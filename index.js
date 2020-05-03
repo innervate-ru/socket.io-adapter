@@ -1,3 +1,7 @@
+/**
+ * Const from socket.io-parser package.
+ */
+var EVENT = 2;
 
 /**
  * Module dependencies.
@@ -133,8 +137,9 @@ Adapter.prototype.broadcast = function(packet, opts){
   var socket;
 
   packet.nsp = this.nsp.name;
-  this.encoder.encode(packet, function(encodedPackets) {
+  if (packet.type === EVENT && packet.data[1] && packet.data[1].hasOwnProperty('payload')) { // apply socket.filter?, if packet.data[1].payload exists
     if (rooms.length) {
+      var encodedPackets;
       for (var i = 0; i < rooms.length; i++) {
         var room = self.rooms[rooms[i]];
         if (!room) continue;
@@ -144,22 +149,56 @@ Adapter.prototype.broadcast = function(packet, opts){
             if (ids[id] || ~except.indexOf(id)) continue;
             socket = self.nsp.connected[id];
             if (socket) {
+              if (socket.filter) {
+                if (!socket.filter(...packet.data)) continue; // do not send payload to this socket
+                if (!encodedPackets) {
+                  this.encoder.encode({type: EVENT, data: [packet.data[0], packet.data[1].payload]}, function (_encodedPackets) {
+                    encodedPackets = _encodedPackets;
+                  });
+                }
+              } else {
+                if (!encodedPackets) {
+                  this.encoder.encode(packet, function (_encodedPackets) {
+                    encodedPackets = _encodedPackets;
+                  });
+                }
+              }
               socket.packet(encodedPackets, packetOpts);
               ids[id] = true;
             }
           }
         }
       }
-    } else {
-      for (var id in self.sids) {
-        if (self.sids.hasOwnProperty(id)) {
-          if (~except.indexOf(id)) continue;
-          socket = self.nsp.connected[id];
-          if (socket) socket.packet(encodedPackets, packetOpts);
+    }
+  } else {
+    this.encoder.encode(packet, function (encodedPackets) {
+      if (rooms.length) {
+        for (var i = 0; i < rooms.length; i++) {
+          var room = self.rooms[rooms[i]];
+          if (!room) continue;
+          var sockets = room.sockets;
+          for (var id in sockets) {
+            if (sockets.hasOwnProperty(id)) {
+              if (ids[id] || ~except.indexOf(id)) continue;
+              socket = self.nsp.connected[id];
+              if (socket) {
+                socket.packet(encodedPackets, packetOpts);
+                ids[id] = true;
+              }
+            }
+          }
+        }
+      } else {
+        for (var id in self.sids) {
+          if (self.sids.hasOwnProperty(id)) {
+            if (~except.indexOf(id)) continue;
+            socket = self.nsp.connected[id];
+            if (socket) socket.packet(encodedPackets, packetOpts);
+          }
         }
       }
-    }
-  });
+    });
+  }
 };
 
 /**
